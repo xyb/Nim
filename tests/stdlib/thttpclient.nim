@@ -228,10 +228,21 @@ proc newProxyTest() =
     except ValueError:
       discard
 
+proc proxyFromEnvTest() =
+  block:
+    putEnv("http_proxy", "localhost:1234")
+
+    let client = newHttpClient()
+
+    doAssert client.proxy.url.hostname == "localhost"
+    doAssert client.proxy.url.port == "1234"
+    delEnv("http_proxy")
+
 ipv6Test()
 syncTest()
 waitFor(asyncTest())
 
 newProxyTest()
+proxyFromEnvTest()
 
 echo "OK"

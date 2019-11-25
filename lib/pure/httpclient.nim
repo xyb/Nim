@@ -563,7 +563,7 @@ type
     maxRedirects: int
     userAgent: string
     timeout*: int         ## Only used for blocking HttpClient for now.
-    proxy: Proxy
+    proxy*: Proxy
     ## ``nil`` or the callback to call when request progress changes.
     when SocketType is Socket:
       onProgressChanged*: ProgressChangedProc[void]
@@ -611,7 +611,6 @@ proc newHttpClient*(userAgent = defUserAgent,
   if proxy.isNil:
     let proxyFromEnv = newProxyFromEnv()
     if proxyFromEnv.url.hostname != "":
-      echo "using proxy ", repr(proxyFromEnv)
       result.proxy = proxyFromEnv
   result.timeout = timeout
   result.onProgressChanged = nil
