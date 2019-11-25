@@ -291,9 +291,84 @@ proc getDefaultSSL(): SSLContext =
       result = defaultSslContext
       doAssert result != nil, "failure to initialize the SSL context"
 
+proc splitScheme(url: string): (string, string) =
+  ## split "type:opaquestring" to "type", "opaquestring".
+  var i = 0
+  result[1] = url
+  let doubleSlash = url.len > 1 and url[1] == '/'
+  i.inc parseWhile(url, result[0], Letters + Digits + {'+', '-', '.'}, i)
+  if (i >= url.len or url[i] != ':') and not doubleSlash:
+    i = 0
+    result[0] = ""
+  if not doubleSlash and url[i] == ':':
+    i.inc
+  result[1] = url[i..<len(url)]
+
+proc splitUser(host: string): (string, string) =
+  ## split "user[:passwd][@host[:port]]" to "user[:passwd]", "[host[:port]]".
+  let splited = host.rsplit('@', maxsplit=1)
+  if len(splited) == 2:
+    result[0] = splited[0]
+    result[1] = splited[1]
+  else:
+    result[0] = ""
+    result[1] = host
+
+proc splitPassword(user: string): (string, string) =
+  ## split "user:passwd" to "user", "passwd".
+  let splited = user.split(':', maxsplit=1)
+  if len(splited) == 2:
+    result[0] = splited[0]
+    result[1] = splited[1]
+  else:
+    result[0] = user
+    result[1] = ""
+
+proc parseProxy(proxy: string): Uri =
+  ## Return a URI for proxy given `url`.
+  var (scheme, rightSide) = splitScheme(proxy)
+
+  var authority = ""
+  if not rightSide.startsWith('/'):
+    scheme = ""
+    authority = proxy
+  else:
+    if not rightSide.startsWith("//"):
+      raise newException(ValueError, "invalid proxy URL : " & repr(proxy))
+    var authorityEnd = rightSide.find('/', 2)
+    if authorityEnd == -1:
+      authorityEnd = len(rightSide)
+    authority = rightSide[2..<authorityEnd]
+  result.scheme = scheme
+
+  let (userinfo, hostport) = splitUser(authority)
+  if userinfo != "":
+    (result.username, result.password) = splitPassword(userinfo)
+
+  let hostinfo = hostport.split(':', maxsplit=1)
+  result.hostname = hostinfo[0]
+  if hostinfo.len == 2:
+    result.port = hostinfo[1]
+  else:
+    result.port = "80" # default http port
+
 proc newProxy*(url: string, auth = ""): Proxy =
   ## Constructs a new ``TProxy`` object.
-  result = Proxy(url: parseUri(url), auth: auth)
+  let proxy = parseProxy(url)
+  if auth == "" and proxy.username != "":
+    result = Proxy(url: proxy, auth: proxy.username & ":" & proxy.password)
+  else:
+    result = Proxy(url: parseProxy(url), auth: auth)
+
+proc newProxyFromEnv*(): Proxy =
+  ## Return a new ``TProxy`` object using url from `http_proxy` or
+  ## `https_proxy` environment variables.
+  var url = ""
+  if existsEnv("http_proxy"):
+    url = getEnv("http_proxy")
+  elif existsEnv("https_proxy"):
+    url = getEnv("https_proxy")
+  result = newProxy(url)
 
 proc newMultipartData*: MultipartData =
   ## Constructs a new ``MultipartData`` object.
@@ -533,6 +608,11 @@ proc newHttpClient*(userAgent = defUserAgent,
   result.userAgent = userAgent
   result.maxRedirects = maxRedirects
   result.proxy = proxy
+  if proxy.isNil:
+    let proxyFromEnv = newProxyFromEnv()
+    if proxyFromEnv.url.hostname != "":
+      echo "using proxy ", repr(proxyFromEnv)
+      result.proxy = proxyFromEnv
   result.timeout = timeout
   result.onProgressChanged = nil
   result.bodyStream = newStringStream()
